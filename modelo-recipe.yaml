@@ -1,6 +1,6 @@
 nome: firefox
 versao: 118.0
-descricao: "Mozilla Firefox Web Browser - receita completa modelo para testes e aprendizado"
+descricao: "Mozilla Firefox Web Browser - receita ultra-completa modelo universal"
 
 urls:
   tarball: "https://archive.mozilla.org/pub/firefox/releases/118.0/source/firefox-118.0.source.tar.xz"
@@ -24,6 +24,10 @@ dependencias_build:
   - meson
   - ninja
   - cmake
+  - cargo
+  - make
+  - bash
+  - perl
 
 dependencias_runtime:
   - gtk3
@@ -40,6 +44,10 @@ dependencias_runtime:
   - fontconfig
   - libvpx
   - webp
+  - webrtc
+  - python3
+  - gnome-settings-daemon
+  - cairo
 
 flags_USE:
   - pulseaudio
@@ -57,8 +65,19 @@ flags_USE:
   - sanitizer
   - hardening
   - lto
+  - x11
+  - wayland-backend
+  - gtk3
+  - clang
+  - rust
 
-tipo_build: mozconfig  # outros possíveis: autotools, meson, cargo, cmake, python
+tipo_build:
+  - mozconfig
+  - autotools
+  - meson
+  - cargo
+  - cmake
+  - python
 
 binario_disponivel: true
 
@@ -67,6 +86,8 @@ patches:
   - "patches/compat-lib.patch"
   - "patches/enable-lto.patch"
   - "patches/wayland-support.patch"
+  - "patches/enable-sanitizer.patch"
+  - "patches/fix-docs.patch"
 
 grupo: "@desktop"
 
@@ -77,12 +98,14 @@ hooks:
   pre_build:
     - "echo 'Preparando build do Firefox...'"
     - "mkdir -p build_output"
+    - "export CFLAGS='-O2 -pipe -fstack-protector-strong'"
   post_build:
     - "echo 'Build concluído, rodando testes...'"
     - "tail -f logs/build-firefox.log"
   post_install:
     - "echo 'Instalação concluída!'"
     - "chmod -R 755 /opt/firefox"
+    - "ln -sf /opt/firefox/firefox /usr/bin/firefox"
   post_remove:
     - "echo 'Pacote removido, limpando arquivos...'"
     - "rm -rf /opt/firefox /tmp/pm-sandbox/build/firefox"
@@ -90,3 +113,6 @@ hooks:
 tests:
   command: "make check"
   required: true
+  optional_commands:
+    - "cargo test"
+    - "python3 -m unittest discover tests"
