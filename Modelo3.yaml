@@ -1,0 +1,111 @@
+nome: "<NOME_DO_PACOTE>"
+versao: "<VERSAO_DO_PACOTE>"
+descricao: "<DESCRICAO_DO_PACOTE>"
+
+urls:
+  tarball: "<URL_DO_TARBALL>"
+  git: "<URL_DO_REPOSITORIO_GIT>"
+
+sha256: "<SHA256_DO_TARBALL>"
+
+dependencias_build:
+  - autoconf2.13
+  - automake
+  - libtool
+  - clang
+  - gcc
+  - rust
+  - python3
+  - nodejs
+  - cbindgen
+  - pkg-config
+  - meson
+  - ninja
+  - cmake
+  - cargo
+  - make
+
+dependencias_runtime:
+  - gtk3
+  - libXt
+  - libevent
+  - zlib
+  - alsa-lib
+  - ffmpeg
+  - icu
+  - pulseaudio
+  - systemd
+  - xorg-server
+  - harfbuzz
+  - fontconfig
+  - libvpx
+  - webp
+
+flags_USE:
+  - pulseaudio
+  - system-icu
+  - ffmpeg
+  - pdf
+  - webgl
+  - multilib
+  - debug
+  - doc
+  - man
+  - gnome
+  - wayland
+  - webrtc
+  - sanitizer
+  - hardening
+  - lto
+  - x11
+  - gtk3
+  - rust
+  - clang
+
+tipo_build:
+  - mozconfig
+  - autotools
+  - meson
+  - cargo
+  - cmake
+  - python
+
+binario_disponivel: false
+
+patches:
+  - "patches/<PATCH1>.patch"
+  - "patches/<PATCH2>.patch"
+
+grupo: "<GRUPO_DO_PACOTE>"
+
+hooks:
+  pre_download:
+    - "echo 'Preparando download de <NOME_DO_PACOTE>...'"
+    - "mkdir -p /tmp/pm-cache"
+  pre_build:
+    - "echo 'Preparando build de <NOME_DO_PACOTE>...'"
+    - "mkdir -p build_output"
+    - "export CFLAGS='-O2 -pipe -fstack-protector-strong'"
+    - "export CXXFLAGS='-O2 -pipe -fstack-protector-strong'"
+  post_build:
+    - "echo 'Build concluído!'"
+    - "make check || echo 'Alguns testes falharam, mas continuação permitida'"
+    - "cargo test || echo 'Testes Rust falharam, continuar mesmo assim'"
+  post_install:
+    - "echo 'Instalação iniciada...'"
+    - "mkdir -p /opt/<NOME_DO_PACOTE>"
+    - "cp -r build_output/* /opt/<NOME_DO_PACOTE>/"
+    - "chmod -R 755 /opt/<NOME_DO_PACOTE>"
+    - "ln -sf /opt/<NOME_DO_PACOTE>/<EXECUTAVEL> /usr/bin/<NOME_DO_PACOTE>"
+    - "echo 'Instalação finalizada com sucesso'"
+  post_remove:
+    - "echo 'Removendo pacote <NOME_DO_PACOTE>...'"
+    - "rm -rf /opt/<NOME_DO_PACOTE> /tmp/pm-sandbox/build/<NOME_DO_PACOTE> /tmp/pm-cache"
+    - "echo 'Limpeza concluída'"
+
+tests:
+  command: "make check"
+  required: true
+  optional_commands:
+    - "cargo test"
+    - "python3 -m unittest discover tests"
