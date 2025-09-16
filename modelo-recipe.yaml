@@ -1,6 +1,6 @@
 nome: firefox
 versao: 118.0
-descricao: "Mozilla Firefox Web Browser - versão completa com todas opções"
+descricao: "Mozilla Firefox Web Browser - receita completa modelo para testes e aprendizado"
 
 urls:
   tarball: "https://archive.mozilla.org/pub/firefox/releases/118.0/source/firefox-118.0.source.tar.xz"
@@ -10,12 +10,20 @@ sha256: "<sha256-do-tarball>"
 
 dependencias_build:
   - autoconf2.13
+  - automake
+  - libtool
   - clang
+  - gcc
   - rust
   - python3
+  - python2
   - nodejs
+  - npm
   - cbindgen
   - pkg-config
+  - meson
+  - ninja
+  - cmake
 
 dependencias_runtime:
   - gtk3
@@ -26,6 +34,12 @@ dependencias_runtime:
   - ffmpeg
   - icu
   - pulseaudio
+  - systemd
+  - xorg-server
+  - harfbuzz
+  - fontconfig
+  - libvpx
+  - webp
 
 flags_USE:
   - pulseaudio
@@ -34,28 +48,44 @@ flags_USE:
   - pdf
   - webgl
   - multilib
+  - debug
+  - doc
+  - man
+  - gnome
+  - wayland
+  - webrtc
+  - sanitizer
+  - hardening
+  - lto
 
-tipo_build: mozconfig
+tipo_build: mozconfig  # outros possíveis: autotools, meson, cargo, cmake, python
 
 binario_disponivel: true
 
 patches:
   - "patches/fix-some-feature.patch"
   - "patches/compat-lib.patch"
+  - "patches/enable-lto.patch"
+  - "patches/wayland-support.patch"
 
 grupo: "@desktop"
 
 hooks:
   pre_download:
     - "echo 'Preparando download do Firefox...'"
+    - "mkdir -p /tmp/pm-cache"
   pre_build:
     - "echo 'Preparando build do Firefox...'"
+    - "mkdir -p build_output"
   post_build:
     - "echo 'Build concluído, rodando testes...'"
+    - "tail -f logs/build-firefox.log"
   post_install:
     - "echo 'Instalação concluída!'"
+    - "chmod -R 755 /opt/firefox"
   post_remove:
     - "echo 'Pacote removido, limpando arquivos...'"
+    - "rm -rf /opt/firefox /tmp/pm-sandbox/build/firefox"
 
 tests:
   command: "make check"
