@@ -1,0 +1,62 @@
+nome: firefox
+versao: 118.0
+descricao: "Mozilla Firefox Web Browser - versão completa com todas opções"
+
+urls:
+  tarball: "https://archive.mozilla.org/pub/firefox/releases/118.0/source/firefox-118.0.source.tar.xz"
+  git: "https://hg.mozilla.org/mozilla-central"
+
+sha256: "<sha256-do-tarball>"
+
+dependencias_build:
+  - autoconf2.13
+  - clang
+  - rust
+  - python3
+  - nodejs
+  - cbindgen
+  - pkg-config
+
+dependencias_runtime:
+  - gtk3
+  - libXt
+  - libevent
+  - zlib
+  - alsa-lib
+  - ffmpeg
+  - icu
+  - pulseaudio
+
+flags_USE:
+  - pulseaudio
+  - system-icu
+  - ffmpeg
+  - pdf
+  - webgl
+  - multilib
+
+tipo_build: mozconfig
+
+binario_disponivel: true
+
+patches:
+  - "patches/fix-some-feature.patch"
+  - "patches/compat-lib.patch"
+
+grupo: "@desktop"
+
+hooks:
+  pre_download:
+    - "echo 'Preparando download do Firefox...'"
+  pre_build:
+    - "echo 'Preparando build do Firefox...'"
+  post_build:
+    - "echo 'Build concluído, rodando testes...'"
+  post_install:
+    - "echo 'Instalação concluída!'"
+  post_remove:
+    - "echo 'Pacote removido, limpando arquivos...'"
+
+tests:
+  command: "make check"
+  required: true
