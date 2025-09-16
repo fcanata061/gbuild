@@ -1,0 +1,180 @@
+==============================
+GERENCIADOR DE PACOTES - TUTORIAL COMPLETO
+==============================
+
+1. VISÃO GERAL
+O gerenciador é um sistema de construção e instalação de pacotes inspirado em Portage, totalmente modular e extensível. Ele suporta:
+
+- Sandbox isolado para builds
+- Uso de binários pré-compilados ou builds a partir da fonte
+- Hooks em todas as etapas do pipeline
+- Testes automáticos (make check, cargo test, etc.)
+- Instalação por grupos de pacotes
+- Rollback e snapshots
+- Logs detalhados e acompanhamento em tempo real
+- USE flags para habilitar/desabilitar funcionalidades do pacote
+
+------------------------------
+2. ESTRUTURA DE DIRETÓRIOS
+------------------------------
+/pm
+├─ bin/                  # Executáveis do gerenciador
+├─ recipes/              # Receitas de pacotes (YAML ou JSON)
+│   ├─ firefox.yaml
+│   ├─ glibc.yaml
+│   └─ ...
+├─ sandbox/
+│   ├─ build/            # Diretório temporário de compilação
+│   └─ install/          # Diretório de instalação temporário
+├─ logs/                 # Logs de compilação e testes
+├─ db/                   # Banco de dados de pacotes instalados
+├─ patches/              # Patches aplicáveis aos pacotes
+└─ snapshots/            # Snapshots do sistema
+
+Cada pacote é construído em um diretório isolado dentro de sandbox/build/<nome-pacote>
+e instalado temporariamente em sandbox/install/<nome-pacote> antes de ir para o sistema final.
+
+------------------------------
+3. COMANDOS DO GERENCIADOR
+------------------------------
+
+3.1 Instalação
+pm install <pacote> [--bin] [--with-tests] [--tests-required] [-jN]
+
+- <pacote>: Nome do pacote ou caminho da receita
+- --bin: Instala pacote pré-compilado, se disponível
+- --with-tests: Executa testes, mas não bloqueia instalação se falhar
+- --tests-required: Executa testes e bloqueia instalação se falhar
+- -jN: Número de threads para compilação paralela
+
+Exemplo:
+pm install firefox --with-tests -j8
+
+3.2 Remover Pacote
+pm remove <pacote>
+
+- Remove o pacote
+- Executa hooks post_remove
+- Detecta dependências órfãs
+- Atualiza banco de dados
+
+3.3 Atualizar Sistema
+pm upgrade [-jN]
+
+- Recompila todos os pacotes instalados, respeitando dependências
+- Suporta compilação paralela
+
+3.4 Instalar Grupo de Pacotes
+pm install-group <grupo> [--bin] [--with-tests] [-jN]
+
+- Grupos pré-definidos: @base, @desktop, @dev, etc.
+- Instala todos os pacotes do grupo
+
+3.5 Rollback de Pacotes
+pm rollback <pacote> <versao>
+
+- Reverte o pacote para a versão anterior
+- Útil para evitar problemas após update
+
+3.6 Snapshots
+pm snapshot save <nome>
+pm snapshot restore <nome>
+
+- Cria ou restaura snapshots completos do sistema
+
+------------------------------
+4. PIPELINE DE BUILD
+------------------------------
+
+1. Resolver dependências build e runtime
+2. Executar hooks pre_download
+3. Baixar pacote (tarball ou git)
+4. Validar SHA256
+5. Extrair pacote
+6. Aplicar patches
+7. Configurar build (autotools, mozconfig, cargo, meson, etc.)
+8. Compilar (paralelo, se aplicável)
+9. Executar testes (make check, cargo test)
+10. Executar hooks post_build
+11. Instalar no sandbox ou destino final
+12. Executar hooks post_install
+13. Registrar pacote no banco de dados
+
+------------------------------
+5. HOOKS
+------------------------------
+
+Hooks disponíveis:
+
+- pre_download: Executado antes de baixar o pacote
+- pre_build: Executado antes da compilação
+- post_build: Executado após compilação
+- post_install: Executado após instalação
+- post_remove: Executado após remoção
+
+Os hooks podem ser scripts externos ou comandos shell.
+
+------------------------------
+6. USE FLAGS
+------------------------------
+
+- Permitem habilitar ou desabilitar funcionalidades opcionais
+- Exemplo: pulseaudio, ffmpeg, doc, man, multilib
+- Dependências extras podem ser puxadas automaticamente de acordo com as flags
+
+------------------------------
+7. BINÁRIOS PRÉ-COMPILADOS
+------------------------------
+
+- Permite instalar pacotes sem compilar
+- Usado com a flag --bin
+- Útil para pacotes grandes (Firefox, Chromium)
+- Pode ser integrado com repositório remoto (binhost)
+
+------------------------------
+8. TESTES AUTOMÁTICOS
+------------------------------
+
+- Integrado ao pipeline, executado no sandbox
+- Modos de execução:
+    --with-tests: roda testes, falhas não bloqueiam
+    --tests-required: falha bloqueia instalação
+    --without-tests: ignora testes
+- Logs armazenados em logs/teste-<pacote>.log
+
+------------------------------
+9. ROLLBACK E SNAPSHOTS
+------------------------------
+
+- Rollback: volta um pacote para versão anterior
+- Snapshots: permitem restaurar todo o sistema a um estado anterior
+- Snapshots são armazenados em snapshots/
+
+------------------------------
+10. LOGS E MONITORAMENTO
+------------------------------
+
+- Logs detalhados por pacote e etapa
+- Monitora logs em tempo real com tail -f (placeholder)
+- Hooks e testes também geram logs separados
+
+------------------------------
+11. INSTALAÇÃO POR GRUPOS
+------------------------------
+
+- Define grupos de pacotes (ex: @base, @desktop)
+- Instala todos os pacotes do grupo respeitando dependências
+- Pode usar flags USE, testes e binários individualmente
+
+------------------------------
+12. SUGESTÕES DE USO
+------------------------------
+
+- Para pacotes grandes: usar --bin para acelerar
+- Para pacotes críticos (glibc, gcc): usar --tests-required
+- Para atualizar todo o sistema: pm upgrade -j8
+- Para criar snapshots antes de upgrades: pm snapshot save pre-upgrade
+
+==============================
+FIM DO TUTORIAL
+==============================
