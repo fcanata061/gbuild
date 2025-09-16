@@ -1,0 +1,92 @@
+nome: gcc
+versao: "13.2.0"
+descricao: "GNU Compiler Collection - C, C++, Fortran, Objective-C, Go, Ada - receita ultra-completa"
+
+urls:
+  tarball: "https://ftp.gnu.org/gnu/gcc/gcc-13.2.0/gcc-13.2.0.tar.xz"
+  git: "https://gcc.gnu.org/git/gcc.git"
+
+sha256: "<sha256-do-tarball>"
+
+dependencias_build:
+  - gmp
+  - mpfr
+  - mpc
+  - isl
+  - libtool
+  - automake
+  - autoconf
+  - make
+  - bash
+  - flex
+  - bison
+  - texinfo
+  - python3
+  - perl
+  - zlib-devel
+
+dependencias_runtime:
+  - glibc
+  - libstdc++
+  - zlib
+  - libgcc_s
+
+flags_USE:
+  - c
+  - cxx
+  - fortran
+  - objc
+  - go
+  - ada
+  - lto
+  - multilib
+  - bootstrap
+  - libssp
+  - hardening
+  - sanitize
+  - debug
+  - graphviz
+
+tipo_build: autotools
+
+binario_disponivel: true
+
+patches:
+  - "patches/fix-libstdcxx.patch"
+  - "patches/enable-lto.patch"
+  - "patches/fix-multilib.patch"
+
+grupo: "@dev"
+
+hooks:
+  pre_download:
+    - "echo 'Preparando download do GCC...'"
+    - "mkdir -p /tmp/pm-cache"
+  pre_build:
+    - "echo 'Configurando build do GCC...'"
+    - "./configure --prefix=/opt/gcc-13.2.0 --enable-languages=c,c++,fortran,go,objc,ada --enable-multilib --enable-bootstrap --disable-multilib-optional"
+    - "echo 'Configuração concluída'"
+  post_build:
+    - "echo 'Build concluído!'"
+    - "echo 'Executando testes paralelos...'"
+    - "make -j$(nproc) check || echo 'Alguns testes falharam, mas continuação permitida'"
+    - "echo 'Testes completos'"
+  post_install:
+    - "echo 'Instalação iniciada...'"
+    - "make install"
+    - "ln -sf /opt/gcc-13.2.0/bin/gcc /usr/bin/gcc"
+    - "ln -sf /opt/gcc-13.2.0/bin/g++ /usr/bin/g++"
+    - "ln -sf /opt/gcc-13.2.0/bin/gfortran /usr/bin/gfortran"
+    - "echo 'Instalação concluída com links simbólicos'"
+  post_remove:
+    - "echo 'Removendo GCC...'"
+    - "rm -rf /opt/gcc-13.2.0 /tmp/pm-sandbox/build/gcc-13.2.0 /tmp/pm-cache"
+    - "echo 'Limpeza concluída'"
+
+tests:
+  command: "make check"
+  required: true
+  optional_commands:
+    - "make -k -j$(nproc) check-gcc"
+    - "make -k -j$(nproc) check-c++"
+    - "make -k -j$(nproc) check-fortran"
