@@ -1,0 +1,271 @@
+package main
+
+import (
+    "fmt"
+    "os"
+    "os/exec"
+    "sync"
+    "time"
+)
+
+// -----------------------------
+// Estruturas principais
+// -----------------------------
+
+type Receita struct {
+    Nome              string
+    Versao            string
+    Descricao         string
+    URLs              URLs
+    SHA256            string
+    DependenciasBuild []string
+    DependenciasRun   []string
+    FlagsUSE          []string
+    TipoBuild         string // autotools, mozconfig, binario, cargo, etc.
+    Hooks             Hooks
+    Tests             *Testes
+    BinarioDisponivel bool // se pode instalar binário pré-compilado
+}
+
+type URLs struct {
+    Tarball string
+    Git     string
+}
+
+type Hooks struct {
+    PreDownload  []string
+    PreBuild     []string
+    PostBuild    []string
+    PostInstall  []string
+    PostRemove   []string
+}
+
+type Testes struct {
+    Command  string
+    Required bool
+}
+
+type Grupo struct {
+    Nome      string
+    Descricao string
+    Pacotes   []string
+}
+
+type PacoteInstalado struct {
+    Nome        string
+    Versao      string
+    FlagsUSE    []string
+    InstaladaEm time.Time
+}
+
+// -----------------------------
+// Sandbox
+// -----------------------------
+
+type Sandbox struct {
+    PathBuild   string
+    PathInstall string
+    Env         map[string]string
+}
+
+// -----------------------------
+// Banco de dados / logs
+// -----------------------------
+
+type BancoDados struct {
+    Pacotes map[string]PacoteInstalado
+    Mutex   sync.Mutex
+}
+
+func (db *BancoDados) RegistrarPacote(pkg PacoteInstalado) {
+    db.Mutex.Lock()
+    defer db.Mutex.Unlock()
+    db.Pacotes[pkg.Nome] = pkg
+}
+
+// -----------------------------
+// Gerenciador principal
+// -----------------------------
+
+type Gerenciador struct {
+    Banco   *BancoDados
+    Sandbox Sandbox
+    Grupos  map[string]Grupo
+}
+
+func NovoGerenciador() *Gerenciador {
+    return &Gerenciador{
+        Banco:   &BancoDados{Pacotes: make(map[string]PacoteInstalado)},
+        Sandbox: Sandbox{Env: make(map[string]string)},
+        Grupos:  make(map[string]Grupo),
+    }
+}
+
+// -----------------------------
+// Operações do gerenciador
+// -----------------------------
+
+func (g *Gerenciador) InstalarPacote(pkg Receita, usarBinario bool, rodarTestes bool, jobs int) error {
+    fmt.Println("Iniciando instalação:", pkg.Nome)
+
+    // 1. Resolver dependências
+    // 2. Executar hooks pre_download
+    ExecutarHook(pkg.Hooks.PreDownload, g.Sandbox)
+
+    // 3. Baixar o pacote (tarball/git)
+    if usarBinario && pkg.BinarioDisponivel {
+        fmt.Println("Instalando binário pré-compilado de", pkg.Nome)
+        // placeholder: baixar e extrair binário
+    } else {
+        fmt.Println("Baixando e compilando fonte de", pkg.Nome)
+        // placeholder: download tarball/git
+        // placeholder: validar SHA256
+        // placeholder: extrair e aplicar patches
+
+        // 4. Configurar build
+        fmt.Println("Configurando build:", pkg.TipoBuild)
+
+        // 5. Compilar (paralelo)
+        fmt.Printf("Compilando com %d threads...\n", jobs)
+        // placeholder: make -jN ou equivalente
+
+        // 6. Rodar testes
+        if rodarTestes {
+            RodarTestes(pkg.Tests, g.Sandbox)
+        }
+
+        // 7. Executar hooks post_build
+        ExecutarHook(pkg.Hooks.PostBuild, g.Sandbox)
+
+        // 8. Instalar no sandbox / destino final
+        fmt.Println("Instalando pacote no sandbox:", g.Sandbox.PathInstall)
+        // placeholder: make install DESTDIR=sandbox
+    }
+
+    // 9. Executar hooks post_install
+    ExecutarHook(pkg.Hooks.PostInstall, g.Sandbox)
+
+    // 10. Registrar pacote no banco de dados
+    g.Banco.RegistrarPacote(PacoteInstalado{
+        Nome:        pkg.Nome,
+        Versao:      pkg.Versao,
+        FlagsUSE:    pkg.FlagsUSE,
+        InstaladaEm: time.Now(),
+    })
+
+    return nil
+}
+
+func (g *Gerenciador) RemoverPacote(nome string) error {
+    fmt.Println("Removendo pacote:", nome)
+    return nil
+}
+
+func (g *Gerenciador) AtualizarSistema(jobs int) error {
+    fmt.Println("Atualizando todo o sistema...")
+    return nil
+}
+
+func (g *Gerenciador) InstalarGrupo(nome string, usarBinario bool, rodarTestes bool, jobs int) error {
+    grupo, ok := g.Grupos[nome]
+    if !ok {
+        return fmt.Errorf("grupo %s não encontrado", nome)
+    }
+    fmt.Println("Instalando grupo:", nome)
+    for _, pkgNome := range grupo.Pacotes {
+        // Placeholder: buscar receita do pacote
+        receita := Receita{Nome: pkgNome} 
+        g.InstalarPacote(receita, usarBinario, rodarTestes, jobs)
+    }
+    return nil
+}
+
+func (g *Gerenciador) RollbackPacote(nome string, versao string) error {
+    fmt.Println("Rollback do pacote:", nome, "para versão", versao)
+    return nil
+}
+
+func (g *Gerenciador) CriarSnapshot(nome string) error {
+    fmt.Println("Criando snapshot:", nome)
+    return nil
+}
+
+func (g *Gerenciador) RestaurarSnapshot(nome string) error {
+    fmt.Println("Restaurando snapshot:", nome)
+    return nil
+}
+
+// -----------------------------
+// Funções auxiliares
+// -----------------------------
+
+func ExecutarHook(hooks []string, sandbox Sandbox) error {
+    for _, cmd := range hooks {
+        fmt.Println("[HOOK] Executando:", cmd)
+        // placeholder: executar no sandbox e capturar logs
+    }
+    return nil
+}
+
+func RodarTestes(tests *Testes, sandbox Sandbox) error {
+    if tests == nil {
+        return nil
+    }
+    fmt.Println("[TESTES] Executando:", tests.Command)
+    if tests.Required {
+        fmt.Println("[TESTES] Falha bloqueia instalação")
+    }
+    return nil
+}
+
+func ConfigurarSandbox(s *Sandbox, pacote Receita) {
+    s.PathBuild = "/tmp/pm-sandbox/build/" + pacote.Nome
+    s.PathInstall = "/tmp/pm-sandbox/install/" + pacote.Nome
+    s.Env["SANDBOX"] = s.PathInstall
+}
+
+// -----------------------------
+// Logs em tempo real (tail -f) placeholder
+// -----------------------------
+
+func MonitoraLog(path string) {
+    fmt.Println("[LOG] Monitorando em tempo real:", path)
+    // placeholder: implementar tail -f
+}
+
+// -----------------------------
+// CLI simplificado
+// -----------------------------
+
+func main() {
+    gerenciador := NovoGerenciador()
+
+    // Exemplo de receita
+    receita := Receita{
+        Nome:     "firefox",
+        Versao:   "118.0",
+        TipoBuild: "mozconfig",
+        FlagsUSE: []string{"pulseaudio", "ffmpeg"},
+        BinarioDisponivel: true,
+        Hooks: Hooks{
+            PreBuild: []string{"echo 'Preparando build'"},
+        },
+        Tests: &Testes{
+            Command:  "make check",
+            Required: true,
+        },
+    }
+
+    ConfigurarSandbox(&gerenciador.Sandbox, receita)
+
+    // Instalar pacote com binário, rodar testes, usar 8 threads
+    gerenciador.InstalarPacote(receita, true, true, 8)
+
+    // Instalar grupo @base
+    grupoBase := Grupo{
+        Nome: "base",
+        Pacotes: []string{"gcc", "binutils", "glibc", "kernel"},
+    }
+    gerenciador.Grupos["base"] = grupoBase
+    gerenciador.InstalarGrupo("@base", false, true, 8)
+}
