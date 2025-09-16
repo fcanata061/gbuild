@@ -1,0 +1,110 @@
+nome: firefox
+versao: 118.0
+descricao: "Mozilla Firefox Web Browser - receita completa usando apenas hooks inline"
+
+urls:
+  tarball: "https://archive.mozilla.org/pub/firefox/releases/118.0/source/firefox-118.0.source.tar.xz"
+  git: "https://hg.mozilla.org/mozilla-central"
+
+sha256: "<sha256-do-tarball>"
+
+dependencias_build:
+  - autoconf2.13
+  - automake
+  - libtool
+  - clang
+  - gcc
+  - rust
+  - python3
+  - nodejs
+  - cbindgen
+  - pkg-config
+  - meson
+  - ninja
+  - cmake
+  - cargo
+  - make
+
+dependencias_runtime:
+  - gtk3
+  - libXt
+  - libevent
+  - zlib
+  - alsa-lib
+  - ffmpeg
+  - icu
+  - pulseaudio
+  - systemd
+  - xorg-server
+  - harfbuzz
+  - fontconfig
+  - libvpx
+  - webp
+
+flags_USE:
+  - pulseaudio
+  - system-icu
+  - ffmpeg
+  - pdf
+  - webgl
+  - multilib
+  - debug
+  - doc
+  - man
+  - gnome
+  - wayland
+  - webrtc
+  - sanitizer
+  - hardening
+  - lto
+
+tipo_build:
+  - mozconfig
+  - autotools
+  - meson
+  - cargo
+  - cmake
+  - python
+
+binario_disponivel: true
+
+patches:
+  - "patches/fix-some-feature.patch"
+  - "patches/compat-lib.patch"
+
+grupo: "@desktop"
+
+hooks:
+  pre_download:
+    - "echo 'Preparando cache temporário...'"
+    - "mkdir -p /tmp/pm-cache"
+    - "echo 'Cache criado em /tmp/pm-cache'"
+  pre_build:
+    - "echo 'Iniciando preparação de build...'"
+    - "mkdir -p build_output"
+    - "export CFLAGS='-O2 -pipe -fstack-protector-strong'"
+    - "export CXXFLAGS='-O2 -pipe -fstack-protector-strong'"
+    - "echo 'Variáveis de ambiente configuradas'"
+  post_build:
+    - "echo 'Build concluído!'"
+    - "echo 'Rodando testes...'"
+    - "make check || echo 'Alguns testes falharam, mas continuação permitida'"
+    - "cargo test || echo 'Testes Rust falharam, continuar mesmo assim'"
+  post_install:
+    - "echo 'Instalação iniciada...'"
+    - "mkdir -p /opt/firefox"
+    - "cp -r build_output/* /opt/firefox/"
+    - "chmod -R 755 /opt/firefox"
+    - "ln -sf /opt/firefox/firefox /usr/bin/firefox"
+    - "echo 'Instalação finalizada com sucesso'"
+  post_remove:
+    - "echo 'Removendo pacote...'"
+    - "rm -rf /opt/firefox /tmp/pm-sandbox/build/firefox /tmp/pm-cache"
+    - "echo 'Limpeza concluída'"
+
+tests:
+  command: "make check"
+  required: true
+  optional_commands:
+    - "cargo test"
+    - "python3 -m unittest discover tests"
