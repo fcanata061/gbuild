@@ -1,205 +1,271 @@
 import os
-import threading
-import time
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+import shutil
+import subprocess
+import filecmp
+import difflib
+import fnmatch
+from datetime import datetime
+import tarfile
+import hashlib
 
-# -----------------------------
-# Estruturas principais
-# -----------------------------
+# =========================
+# Configurações principais
+# =========================
+BASE_DIR = "/mnt"
+SANDBOX_DIR = "/tmp/pm-sandbox"
+ETC_NEW_DIR = "/var/lib/pm/etc-new"
+ETC_BACKUP_DIR = "/var/lib/pm/etc-backup"
+LOG_FILE = "/var/log/pm.log"
+PACKAGE_DB = "/var/lib/pm/packages.db"
 
-@dataclass
-class URLs:
-    tarball: str
-    git: Optional[str] = None
+# =========================
+# Logs e cores
+# =========================
+class Colors:
+    HEADER = "\033[95m"
+    OK = "\033[92m"
+    WARN = "\033[93m"
+    FAIL = "\033[91m"
+    END = "\033[0m"
 
-@dataclass
-class Hooks:
-    pre_download: List[str] = field(default_factory=list)
-    pre_build: List[str] = field(default_factory=list)
-    post_build: List[str] = field(default_factory=list)
-    post_install: List[str] = field(default_factory=list)
-    post_remove: List[str] = field(default_factory=list)
+def log(msg, level="OK"):
+    color = getattr(Colors, level, Colors.OK)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(LOG_FILE, "a") as f:
+        f.write(f"{timestamp} - {msg}\n")
+    print(f"{color}{msg}{Colors.END}")
 
-@dataclass
-class Testes:
-    command: str
-    required: bool = True
+# =========================
+# Sandbox
+# =========================
+def prepare_sandbox():
+    os.makedirs(SANDBOX_DIR, exist_ok=True)
+    log("Sandbox prepared")
 
-@dataclass
-class Receita:
-    nome: str
-    versao: str
-    descricao: str = ""
-    urls: URLs = None
-    sha256: str = ""
-    dependencias_build: List[str] = field(default_factory=list)
-    dependencias_runtime: List[str] = field(default_factory=list)
-    flags_use: List[str] = field(default_factory=list)
-    tipo_build: str = "autotools"
-    hooks: Hooks = field(default_factory=Hooks)
-    testes: Optional[Testes] = None
-    binario_disponivel: bool = False
+def clean_sandbox():
+    if os.path.exists(SANDBOX_DIR):
+        shutil.rmtree(SANDBOX_DIR)
+    log("Sandbox cleaned")
 
-@dataclass
-class Grupo:
-    nome: str
-    descricao: str = ""
-    pacotes: List[str] = field(default_factory=list)
+# =========================
+# Utilitários
+# =========================
+def download(url, dest):
+    log(f"Downloading {url} -> {dest}")
+    subprocess.run(["curl", "-L", "-o", dest, url], check=True)
 
-@dataclass
-class PacoteInstalado:
-    nome: str
-    versao: str
-    flags_use: List[str]
-    instalada_em: float = field(default_factory=time.time)
+def verify_sha256(path, sha256sum):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    valid = h.hexdigest() == sha256sum
+    log(f"SHA256 {'valid' if valid else 'invalid'} for {path}")
+    return valid
 
-@dataclass
-class Sandbox:
-    path_build: str
-    path_install: str
-    env: Dict[str, str] = field(default_factory=dict)
+def extract_tarball(tar_path, dest):
+    log(f"Extracting {tar_path} -> {dest}")
+    with tarfile.open(tar_path) as tar:
+        tar.extractall(dest)
 
-# -----------------------------
-# Banco de dados / logs
-# -----------------------------
+def apply_patch(patch_path, work_dir):
+    log(f"Applying patch {patch_path}")
+    subprocess.run(["patch", "-p1", "-i", patch_path], cwd=work_dir, check=True)
 
-class BancoDados:
-    def __init__(self):
-        self.pacotes: Dict[str, PacoteInstalado] = {}
-        self.lock = threading.Lock()
+# =========================
+# Gerenciamento /etc
+# =========================
+class EtcManager:
+    def __init__(self, stage_dir):
+        self.ETC_DIR = os.path.join(BASE_DIR, stage_dir, "etc")
+        self.ETC_NEW_DIR = ETC_NEW_DIR
+        self.ETC_BACKUP_ROOT = ETC_BACKUP_DIR
+        self.MERGE_RULES = {"*.conf":"merge","*.cfg":"merge","*":"keep-local"}
 
-    def registrar_pacote(self, pkg: PacoteInstalado):
-        with self.lock:
-            self.pacotes[pkg.nome] = pkg
+    def backup_file(self, path):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        rel_path = os.path.relpath(path, self.ETC_DIR)
+        backup_dir = os.path.join(self.ETC_BACKUP_ROOT, timestamp, os.path.dirname(rel_path))
+        os.makedirs(backup_dir, exist_ok=True)
+        shutil.copy2(path, os.path.join(backup_dir, os.path.basename(path)))
+        log(f"Backup created: {path}")
 
-# -----------------------------
-# Gerenciador principal
-# -----------------------------
+    def merge_files(self, local, new):
+        with open(local) as f1, open(new) as f2:
+            local_lines = f1.readlines()
+            new_lines = f2.readlines()
+        return list(difflib.unified_diff(local_lines, new_lines, fromfile='local', tofile='new'))
 
-class Gerenciador:
-    def __init__(self):
-        self.banco = BancoDados()
-        self.sandbox = Sandbox("/tmp/pm-sandbox/build", "/tmp/pm-sandbox/install")
-        self.grupos: Dict[str, Grupo] = {}
+    def process_file(self, filename, auto=True):
+        local_path = os.path.join(self.ETC_DIR, filename)
+        new_path = os.path.join(self.ETC_NEW_DIR, filename)
 
-    # -------------------------
-    # Funções principais
-    # -------------------------
-
-    def instalar_pacote(self, receita: Receita, usar_binario=False, rodar_testes=True, jobs=1):
-        print(f"[INFO] Instalando pacote: {receita.nome}")
-
-        # Hooks pre_download
-        self.executar_hooks(receita.hooks.pre_download)
-
-        # Binário ou compilação
-        if usar_binario and receita.binario_disponivel:
-            print(f"[INFO] Instalando binário pré-compilado de {receita.nome}")
-        else:
-            print(f"[INFO] Baixando e compilando {receita.nome}")
-            # placeholder: download, validar sha256, extrair, aplicar patch
-            print(f"[INFO] Configurando build: {receita.tipo_build}")
-            print(f"[INFO] Compilando com {jobs} threads...")
-            # placeholder: make -jN ou equivalente
-
-            # Testes
-            if rodar_testes and receita.testes:
-                self.rodar_testes(receita.testes)
-
-            # Hooks post_build
-            self.executar_hooks(receita.hooks.post_build)
-
-            # Instalação no sandbox
-            print(f"[INFO] Instalando pacote no sandbox: {self.sandbox.path_install}")
-
-        # Hooks post_install
-        self.executar_hooks(receita.hooks.post_install)
-
-        # Registrar pacote no banco
-        self.banco.registrar_pacote(PacoteInstalado(
-            nome=receita.nome,
-            versao=receita.versao,
-            flags_use=receita.flags_use
-        ))
-
-    def remover_pacote(self, nome: str):
-        print(f"[INFO] Removendo pacote: {nome}")
-        # placeholder: hooks post_remove, revdep, órfãos
-
-    def atualizar_sistema(self, jobs=1):
-        print("[INFO] Atualizando sistema completo")
-        # placeholder: recompilar todos os pacotes
-
-    def instalar_grupo(self, nome: str, usar_binario=False, rodar_testes=True, jobs=1):
-        grupo = self.grupos.get(nome)
-        if not grupo:
-            print(f"[ERRO] Grupo {nome} não encontrado")
+        if not os.path.exists(local_path):
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            shutil.copy2(new_path, local_path)
+            log(f"Installed new config: {filename}")
             return
-        print(f"[INFO] Instalando grupo: {nome}")
-        for pkg_nome in grupo.pacotes:
-            receita = Receita(nome=pkg_nome, versao="")  # placeholder: buscar receita real
-            self.instalar_pacote(receita, usar_binario, rodar_testes, jobs)
 
-    def rollback_pacote(self, nome: str, versao: str):
-        print(f"[INFO] Rollback do pacote: {nome} para versão {versao}")
-        # placeholder: restaurar versão anterior
+        if filecmp.cmp(local_path, new_path, shallow=False):
+            return
 
-    def criar_snapshot(self, nome: str):
-        print(f"[INFO] Criando snapshot: {nome}")
+        self.backup_file(local_path)
+        rule = "merge" if filename.endswith((".conf",".cfg")) else "keep-local"
+        if rule == "keep-local":
+            log(f"Kept local: {filename}")
+        elif rule == "replace":
+            shutil.copy2(new_path, local_path)
+            log(f"Replaced: {filename}")
+        elif rule == "merge":
+            merged_diff = self.merge_files(local_path, new_path)
+            if merged_diff and auto:
+                merged_lines = list(difflib.restore(merged_diff, 1))
+                with open(local_path, "w") as f:
+                    f.writelines(merged_lines)
+                log(f"Merged automatically: {filename}")
 
-    def restaurar_snapshot(self, nome: str):
-        print(f"[INFO] Restaurando snapshot: {nome}")
+    def process_all(self, auto=True):
+        for root, dirs, files in os.walk(self.ETC_NEW_DIR):
+            for file in files:
+                rel_path = os.path.relpath(os.path.join(root, file), self.ETC_NEW_DIR)
+                self.process_file(rel_path, auto=auto)
 
-    # -------------------------
-    # Funções auxiliares
-    # -------------------------
+def update_etc(stage_dir):
+    etc_mgr = EtcManager(stage_dir)
+    etc_mgr.process_all(auto=True)
 
-    def executar_hooks(self, hooks: List[str]):
-        for cmd in hooks:
-            print(f"[HOOK] Executando: {cmd}")
-            # placeholder: executar no sandbox e capturar logs
+# =========================
+# Hooks
+# =========================
+def run_hooks(stage, hook_type, package=None):
+    log(f"Running hook {hook_type} for {package} in {stage}")
 
-    def rodar_testes(self, testes: Testes):
-        print(f"[TESTES] Executando: {testes.command}")
-        if testes.required:
-            print("[TESTES] Falha bloqueia instalação")
-        # placeholder: executar o comando no sandbox
+# =========================
+# Dependências, USE flags e revdep
+# =========================
+class DependencyManager:
+    def __init__(self):
+        self.installed = set()
 
-    def configurar_sandbox(self, receita: Receita):
-        self.sandbox.path_build = f"/tmp/pm-sandbox/build/{receita.nome}"
-        self.sandbox.path_install = f"/tmp/pm-sandbox/install/{receita.nome}"
-        self.sandbox.env["SANDBOX"] = self.sandbox.path_install
+    def resolve(self, package, recipes):
+        deps = recipes.get(package, {}).get('dependencias_build', [])
+        resolved = []
+        visited = set()
 
-    def monitora_log(self, path: str):
-        print(f"[LOG] Monitorando log em tempo real: {path}")
-        # placeholder: implementar tail -f real
+        def visit(pkg):
+            if pkg in visited:
+                return
+            visited.add(pkg)
+            for d in recipes.get(pkg, {}).get('dependencias_build', []):
+                visit(d)
+            resolved.append(pkg)
 
-# -----------------------------
-# Exemplo de uso
-# -----------------------------
+        visit(package)
+        return resolved
 
+    def revdep(self, package, recipes):
+        rev = []
+        for pkg, data in recipes.items():
+            if package in data.get('dependencias_build', []):
+                rev.append(pkg)
+        return rev
+
+    def mark_installed(self, package):
+        self.installed.add(package)
+        with open(PACKAGE_DB, "a") as f:
+            f.write(f"{package}\n")
+
+    def is_installed(self, package):
+        return package in self.installed
+
+# =========================
+# Build packages
+# =========================
+def build_package(stage, package, recipe, dep_mgr):
+    prepare_sandbox()
+    work_dir = os.path.join(SANDBOX_DIR, package)
+    os.makedirs(work_dir, exist_ok=True)
+
+    # Download
+    tarball_path = os.path.join(work_dir, package + ".tar.xz")
+    download(recipe['urls']['tarball'], tarball_path)
+    if not verify_sha256(tarball_path, recipe['sha256']):
+        log(f"SHA256 mismatch for {package}", "FAIL")
+        return
+
+    # Extract
+    extract_tarball(tarball_path, work_dir)
+
+    # Patch
+    for patch in recipe.get('patches', []):
+        apply_patch(patch, work_dir)
+
+    # Build
+    build_type = recipe.get('tipo_build', 'autotools')
+    if build_type == 'autotools':
+        subprocess.run(["./configure"] + recipe.get('configure_opts', []), cwd=work_dir, check=True)
+        subprocess.run(["make", "-j4"], cwd=work_dir, check=True)
+        subprocess.run(["make", "install", f"DESTDIR={BASE_DIR}/{stage}"], cwd=work_dir, check=True)
+    elif build_type == 'python':
+        subprocess.run(["python3", "setup.py", "install", f"--root={BASE_DIR}/{stage}"], cwd=work_dir, check=True)
+    elif build_type == 'meson':
+        build_dir = os.path.join(work_dir, "build")
+        os.makedirs(build_dir, exist_ok=True)
+        subprocess.run(["meson", ".."], cwd=build_dir, check=True)
+        subprocess.run(["ninja", "-C", build_dir], cwd=build_dir, check=True)
+        subprocess.run(["ninja", "-C", build_dir, "install"], cwd=build_dir, check=True)
+    elif build_type == 'rust':
+        subprocess.run(["cargo", "install", "--root", f"{BASE_DIR}/{stage}"], cwd=work_dir, check=True)
+
+    dep_mgr.mark_installed(package)
+    run_hooks(stage, "post_install", package)
+    update_etc(stage)
+    clean_sandbox()
+
+# =========================
+# Grupos de pacotes
+# =========================
+def handle_group(stage, group_name, recipes, dep_mgr):
+    log(f"Installing group {group_name}")
+    groups = {
+        "@base": ["binutils","gcc-bootstrap","glibc-headers","make","bash","coreutils"],
+        "@dev": ["pkg-config","python3","rust"]
+    }
+    for pkg in groups.get(group_name, []):
+        if pkg in recipes:
+            build_package(stage, pkg, recipes[pkg], dep_mgr)
+
+# =========================
+# Pipeline Stage
+# =========================
+def build_stage(stage, recipes, dep_mgr, groups=None):
+    for package in recipes:
+        for dep in dep_mgr.resolve(package, recipes):
+            if not dep_mgr.is_installed(dep):
+                build_package(stage, dep, recipes[dep], dep_mgr)
+    for package in recipes:
+        if not dep_mgr.is_installed(package):
+            build_package(stage, package, recipes[package], dep_mgr)
+
+    if groups:
+        for group in groups:
+            handle_group(stage, group, recipes, dep_mgr)
+
+# =========================
+# Exemplo de receitas
+# =========================
+GCC_RECIPE = {
+    "urls": {"tarball": "https://ftp.gnu.org/gnu/gcc/gcc-12.2.0/gcc-12.2.0.tar.xz"},
+    "sha256": "d08a6c1a8c23ee8b3e1c1b8d7d5ebf5f9f7715c7b6f4b5646f6b3f6f6b5f6c5f",
+    "dependencias_build": ["mpfr","gmp","mpc"],
+    "tipo_build": "autotools",
+    "configure_opts": ["--disable-multilib"]
+}
+
+# =========================
+# Execução exemplo
+# =========================
 if __name__ == "__main__":
-    gerenciador = Gerenciador()
-
-    receita_firefox = Receita(
-        nome="firefox",
-        versao="118.0",
-        tipo_build="mozconfig",
-        flags_use=["pulseaudio", "ffmpeg"],
-        binario_disponivel=True,
-        hooks=Hooks(
-            pre_build=["echo 'Preparando build'"]
-        ),
-        testes=Testes(
-            command="make check",
-            required=True
-        )
-    )
-
-    gerenciador.configurar_sandbox(receita_firefox)
-    gerenciador.instalar_pacote(receita_firefox, usar_binario=True, rodar_testes=True, jobs=8)
-
-    grupo_base = Grupo(nome="base", pacotes=["gcc", "binutils", "glibc", "kernel"])
-    gerenciador.grupos["base"] = grupo_base
-    gerenciador.instalar_grupo("base", usar_binario=False, rodar_testes=True, jobs=8)
+    dep_mgr = DependencyManager()
+    stage_recipes = {"gcc": GCC_RECIPE}
+    build_stage("stage3", stage_recipes, dep_mgr, groups=["@base","@dev"])
