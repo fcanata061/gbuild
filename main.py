@@ -1,5 +1,5 @@
 import argparse
-from core import build, search, revdep, updater, groups
+from core import build, search, revdep, updater, groups, database
 
 def main():
     parser = argparse.ArgumentParser(prog="pm", description="Gerenciador de Pacotes em Python")
@@ -21,7 +21,7 @@ def main():
     sp_info = subparsers.add_parser("info", aliases=["if"])
     sp_info.add_argument("package")
 
-    # Rebuild (novo)
+    # Rebuild
     sp_rebuild = subparsers.add_parser("rebuild", aliases=["rb"])
     sp_rebuild.add_argument("target", help="'system' ou nome do pacote")
 
@@ -62,6 +62,8 @@ def main():
         build.remove_orphans()
     elif args.command in ("group", "g"):
         groups.handle(args.action, args.group_name)
+    else:
+        parser.print_help()
 
 if __name__ == "__main__":
     main()
